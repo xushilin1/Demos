@@ -1,0 +1,1 @@
+deepspeed --num_gpus=2 deepspeed_demo.py --deepspeed_config ds_config.json
