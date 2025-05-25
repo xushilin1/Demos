@@ -1,1 +1,1 @@
-torchrun --nproc_per_node=2 vae.py
+torchrun --nproc_per_node=2 vqvae.py --epochs 50
