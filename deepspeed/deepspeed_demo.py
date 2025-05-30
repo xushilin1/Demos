@@ -110,7 +110,7 @@ def get_data_loaders(rank, world_size, batch_size=128):
 def train(model_engine, trainloader, criterion, epoch):
     model_engine.train()
     running_loss = 0.0
-    for i, data in enumerate(trainloader, 0):
+    for i, data in enumerate(trainloader):
         inputs, labels = data
         inputs, labels = inputs.cuda(), labels.cuda()
 
