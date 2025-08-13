@@ -34,30 +34,6 @@ one_minus_alphas_bar_sqrt = torch.sqrt(1 - alphas_prod)
 
 print("all the same shape", betas.shape)
 
-
-
-#计算任意时刻的x采样值，基于x_0和重参数化
-def q_x(x_0,t):
-    """可以基于x[0]得到任意时刻t的x[t]"""
-    noise = torch.randn_like(x_0)
-    return (alphas_bar_sqrt[t] * x_0 + one_minus_alphas_bar_sqrt[t] * noise) #在x[0]的基础上添加噪声
-
-
-num_shows = 20
-fig,axs = plt.subplots(2,10,figsize=(28,3))
-plt.rc('text',color='black')
-
-for i in range(num_shows):
-    j = i // 10
-    k = i % 10
-    q_i = q_x(dataset, torch.tensor([i*num_steps//num_shows])).cpu() #生成t时刻的采样数据
-    axs[j,k].scatter(q_i[:,0],q_i[:,1],color='red',edgecolor='white')
-    axs[j,k].set_axis_off()
-    axs[j,k].set_title('$q(\mathbf{x}_{'+str(i*num_steps//num_shows)+'})$')
-
-
-
-
 import torch
 import torch.nn as nn
 
@@ -103,61 +79,15 @@ def diffusion_loss_fn(model, x_0, n_steps):
     
     #构造模型的输入
     x = alphas_bar_sqrt[t] * x_0 + noise * one_minus_alphas_bar_sqrt[t]
-    
-    #送入模型，得到t时刻的随机噪声预测值
-    output = model(x,t.squeeze(-1))
-    
-    #与真实噪声一起计算误差，求平均值
+
+    output = model(x,t.squeeze(-1)) #送入模型，得到t时刻的随机噪声预测值
     return (noise - output).square().mean()
 
 
-
-def p_sample_loop(model, shape, n_steps, device):
-    """从x[T]恢复x[T-1]、x[T-2]|...x[0]"""
-    cur_x = torch.randn(shape, device=device)
-    x_seq = [cur_x]
-    for i in reversed(range(n_steps)):
-        cur_x = p_sample(model, cur_x, i)
-        x_seq.append(cur_x)
-    return x_seq
-
-def p_sample(model,x,t):
-    """从x[T]采样t时刻的重构值"""
-    t = torch.tensor([t], device=x.device)
-
-    z_hat = model(x,t)
-    mean = (1 / (1 - betas[t]).sqrt()) * (x - (betas[t] / one_minus_alphas_bar_sqrt[t] * z_hat))
-    
-    z = torch.randn_like(x)
-    sigma_t = betas[t].sqrt()
-    
-    sample = mean + sigma_t * z
-    return sample
-
-
-
-seed = 1234
-
-class EMA():
-    """构建一个参数平滑器"""
-    def __init__(self, mu=0.01):
-        self.mu = mu
-        self.shadow = {}
-        
-    def register(self,name,val):
-        self.shadow[name] = val.clone()
-        
-    def __call__(self,name,x):
-        assert name in self.shadow
-        new_average = self.mu * x + (1.0-self.mu)*self.shadow[name]
-        self.shadow[name] = new_average.clone()
-        return new_average
-    
 print('Training model...')
 batch_size = 128
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,shuffle=True)
 num_epoch = 4000
-plt.rc('text',color='blue')
 
 model = MLPDiffusion(num_steps).cuda() #输出维度是2，输入是x和step
 optimizer = torch.optim.Adam(model.parameters(),lr=1e-3)
@@ -172,44 +102,32 @@ for t in range(num_epoch):
         
     if(t % 100 == 0):
         print(loss)
-        x_seq = p_sample_loop(model, dataset.shape, num_steps, torch.device('cuda'))
-        
-        fig,axs = plt.subplots(1,10,figsize=(28,3))
-        for i in range(1, 11):
-            cur_x = x_seq[i * 10].detach().cpu()
-            axs[i-1].scatter(cur_x[:, 0],cur_x[:, 1], color='red', edgecolor='white')
-            axs[i-1].set_axis_off()
-            axs[i-1].set_title('$q(\mathbf{x}_{'+str(i*10)+'})$')
 
 
 
+def p_sample(model, x, t):
+    """从x[T]采样t时刻的重构值"""
+    t = torch.tensor([t], device=x.device)
+    z_hat = model(x,t)
+    mean = (1 / (1 - betas[t]).sqrt()) * (x - (betas[t] / one_minus_alphas_bar_sqrt[t] * z_hat))
+    z = torch.randn_like(x)
+    sigma_t = betas[t].sqrt()
+    sample = mean + sigma_t * z
+    return sample
 
-print('hello')
-import io
-from PIL import Image
+def p_sample_loop(model, shape, n_steps, device):
+    """从x[T]恢复x[T-1]、x[T-2]|...x[0]"""
+    cur_x = torch.randn(shape, device=device)
+    x_seq = [cur_x]
+    for i in reversed(range(n_steps)):
+        cur_x = p_sample(model, cur_x, i)
+        x_seq.append(cur_x)
+    return x_seq
 
-imgs = []
-for i in range(100):
-    plt.clf()
-    q_i = q_x(dataset,torch.tensor([i], device=dataset.device)).cpu()
-    plt.scatter(q_i[:,0],q_i[:,1],color='red',edgecolor='white',s=5)
-    plt.axis('off')
-    
-    img_buf = io.BytesIO()
-    plt.savefig(img_buf,format='png')
-    img = Image.open(img_buf)
-    imgs.append(img)
-
-reverse = []
-for i in range(100):
-    plt.clf()
-    cur_x = x_seq[i].detach().cpu()
-    plt.scatter(cur_x[:,0],cur_x[:,1],color='red',edgecolor='white',s=5);
-    plt.axis('off')
-    img_buf = io.BytesIO()
-    plt.savefig(img_buf,format='png')
-    img = Image.open(img_buf)
-    reverse.append(img)
-
-
-imgs[0].save("diffusion.gif", format='GIF', append_images=imgs, save_all=True, duration=100,loop=0)
+x_seq = p_sample_loop(model, dataset.shape, num_steps, torch.device('cuda'))
+fig, axs = plt.subplots(1, 10, figsize=(28,3))
+for i in range(1, 11):
+    cur_x = x_seq[i * 10].detach().cpu()
+    axs[i-1].scatter(cur_x[:, 0],cur_x[:, 1], color='red', edgecolor='white')
+    axs[i-1].set_axis_off()
+    axs[i-1].set_title('$q(\mathbf{x}_{'+str(i*10)+'})$')
