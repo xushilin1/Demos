@@ -191,27 +191,17 @@ def test():
 
     
     with torch.no_grad():
-        # Get a batch of test images
-        data, _ = next(iter(test_loader))
-        data = data.to(device)
-        recon, _ = model(data)
-        
-        # Convert to numpy for visualization
-        data = data.cpu().detach().numpy()
-        recon = recon.cpu().detach().numpy()
-        
-        # Plot original and reconstructed images
-        fig, axes = plt.subplots(2, 8, figsize=(8 * 2, 4))
-        for i in range(8):
-            # Original images
-            axes[0, i].imshow(data[i].squeeze(), cmap='gray')
-            axes[0, i].set_title('Original')
-            axes[0, i].axis('off')
-            # Reconstructed images
-            axes[1, i].imshow(recon[i].squeeze(), cmap='gray')
-            axes[1, i].set_title('Reconstructed')
-            axes[1, i].axis('off')
-        
-        plt.tight_layout()
-        plt.savefig(output_path)
-        plt.close()
+        recon_batch, _, _ = model(reco.view(-1, 784))
+
+    recon_batch = recon_batch.view(-1, 1, 28, 28).cpu()
+
+    fig, axs = plt.subplots(2, 10, figsize=(10, 2))
+    for i in range(10):
+        axs[0, i].imshow(recon_batch[i][0], cmap='gray')
+        axs[0, i].axis('off')
+        axs[1, i].imshow(reco[i].view(28, 28).cpu().detach(), cmap='gray')
+        axs[1, i].axis('off')
+
+    plt.savefig(save_path)
+
+    
