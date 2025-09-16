@@ -7,8 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from torchvision.utils import save_image
-from torchvision.utils import make_grid, save_image
+from torchvision.utils import save_image, make_grid
 
 torch.manual_seed(42)
 np.random.seed(42)
@@ -26,8 +25,10 @@ args = {
     'image_size': 28,
     'channels': 1,
     'num_timesteps': 1000,  # 扩散步骤数
+    'num_inference_steps': 50,  # DDIM推理时的步骤数（可以少于训练步骤）
     'beta_start': 0.0001,   # 噪声 scheduler 参数
     'beta_end': 0.02,
+    'eta': 0.0,  # DDIM参数：0为完全确定性，1为DDPM
     'save_dir': 'diffusion_results',
     'sample_interval': 10   # 每多少个 epoch 保存一次生成的图像
 }
@@ -55,8 +56,6 @@ alphas_cumprod_prev = torch.cat([torch.tensor([1.0]), alphas_cumprod[:-1]])
 
 sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
 sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - alphas_cumprod)
-
-posterior_variance = betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
 
 def get_index_from_list(values, t, x_shape):
     """从列表中获取对应时间步t的值"""
@@ -228,8 +227,78 @@ class UNet(nn.Module):
         
         return self.output(x)
 
-# 定义采样函数
-def sample_timestep(x_t, t):
+
+def ddim_step(x_t, t, t_prev, eta=0.0):
+    """
+    DDIM单步采样
+    Args:
+        x_t: 当前时间步的噪声图像
+        t: 当前时间步
+        t_prev: 前一个时间步
+        eta: 随机性参数，0为完全确定性
+    """
+    # 预测噪声
+    with torch.no_grad():
+        noise_pred = model(x_t, t)
+    
+    alphas_cumprod_t = get_index_from_list(alphas_cumprod, t, x_t.shape)
+    alphas_cumprod_t_prev = get_index_from_list(alphas_cumprod, t_prev, x_t.shape) if t_prev[0] >= 0 else torch.ones_like(alphas_cumprod_t)
+    
+    # 计算预测的原始图像 x_0
+    sqrt_alpha_cumprod_t = torch.sqrt(alphas_cumprod_t)
+    sqrt_one_minus_alpha_cumprod_t = torch.sqrt(1 - alphas_cumprod_t)
+    
+    pred_x0 = (x_t - sqrt_one_minus_alpha_cumprod_t * noise_pred) / sqrt_alpha_cumprod_t
+    
+    # 计算方向向量
+    sqrt_alpha_cumprod_t_prev = torch.sqrt(alphas_cumprod_t_prev)
+    sqrt_one_minus_alpha_cumprod_t_prev = torch.sqrt(1 - alphas_cumprod_t_prev)
+    
+    # DDIM采样公式
+    dir_xt = sqrt_one_minus_alpha_cumprod_t_prev * noise_pred
+    
+    # 添加随机性（eta > 0时）
+    if eta > 0:
+        sigma_t = eta * torch.sqrt((1 - alphas_cumprod_t) / (1 - alphas_cumprod_t)) * torch.sqrt(1 - alphas_cumprod_t / alphas_cumprod_t_prev)
+        noise = torch.randn_like(x_t)
+        dir_xt = dir_xt + sigma_t * noise
+    
+    x_t_prev = sqrt_alpha_cumprod_t_prev * pred_x0 + dir_xt
+    
+    return x_t_prev
+
+def ddim_sample(num_samples, num_inference_steps=None, eta=None):
+    """
+    DDIM采样生成新图像
+    Args:
+        model: 训练好的噪声预测模型
+        num_samples: 生成样本数量
+        num_inference_steps: 推理步骤数，可以少于训练步骤数
+        eta: 随机性参数
+    """
+    if num_inference_steps is None:
+        num_inference_steps = args['num_inference_steps']
+    if eta is None:
+        eta = args['eta']
+    
+    model.eval()
+    with torch.no_grad():
+        x = torch.randn(num_samples, args['channels'], args['image_size'], args['image_size']).to(device)
+        timesteps = torch.linspace(args['num_timesteps'] - 1, 0, num_inference_steps, dtype=torch.long)
+        
+        for i in tqdm(range(len(timesteps)), desc='DDIM采样'):
+            t = torch.full((num_samples,), timesteps[i], device=device, dtype=torch.long)
+            t_prev = torch.full((num_samples,), timesteps[i+1] if i < len(timesteps)-1 else -1, device=device, dtype=torch.long)
+            
+            x = ddim_step(x, t, t_prev, eta)
+        
+        # 调整到[0, 1]范围
+        x = (x.clamp(-1, 1) + 1) / 2
+        x = x.cpu().numpy()
+    model.train()
+    return x
+
+def ddpm_sample_timestep(x_t, t):
     """
     从x_{t}采样x_{t-1}
     """
@@ -249,15 +318,16 @@ def sample_timestep(x_t, t):
         variance = betas_t
         return model_mean + torch.sqrt(variance) * noise
 
-def sample(num_samples):
+
+def ddpm_sample(num_samples):
     """生成新图像"""
     model.eval()
     with torch.no_grad():
         x = torch.randn(num_samples, args['channels'], args['image_size'], args['image_size']).to(device)
         
-        for i in tqdm(reversed(range(0, args['num_timesteps'])), desc='采样', total=args['num_timesteps']):
+        for i in tqdm(reversed(range(0, args['num_timesteps'])), desc='DDPM采样', total=args['num_timesteps']):
             t = torch.full((num_samples,), i, device=device, dtype=torch.long)
-            x = sample_timestep(x, t)
+            x = ddpm_sample_timestep(x, t)
         
         # 调整到[0, 1]范围
         x = (x.clamp(-1, 1) + 1) / 2
@@ -296,12 +366,24 @@ def train():
         print(f'Epoch [{epoch+1}/{args["epochs"]}], Average Loss: {avg_loss:.6f}')
         
         if (epoch + 1) % args['sample_interval'] == 0 or epoch == 0:
-            samples = sample(16)
+            samples = ddpm_sample(16)
             samples = torch.tensor(samples)
             grid = make_grid(samples, nrow=int(np.sqrt(len(samples))))
-            save_path = os.path.join(args['save_dir'], f'samples_epoch_{epoch+1}.png')
+            save_path = os.path.join(args['save_dir'], f'ddpm_samples_epoch_{epoch+1}.png')
+            save_image(grid, save_path)
+
+            samples = ddim_sample(16)
+            samples = torch.tensor(samples)
+            grid = make_grid(samples, nrow=int(np.sqrt(len(samples))))
+            save_path = os.path.join(args['save_dir'], f'ddim_samples_epoch_{epoch+1}.png')
             save_image(grid, save_path)
 
 
 if __name__ == "__main__":
     train()
+    # num_inference_steps = 1000
+    # samples = ddim_sample(16, num_inference_steps=num_inference_steps)
+    # samples = torch.tensor(samples)
+    # grid = make_grid(samples, nrow=int(np.sqrt(len(samples))))
+    # save_path = os.path.join(args['save_dir'], f'ddim_samples_epoch_{num_inference_steps}.png')
+    # save_image(grid, save_path)
