@@ -151,17 +151,27 @@ def test(model_path='vae_model.pth', save_dir='./reconstructions'):
     # test_loader中读取数据
     reco = next(iter(test_loader))[0].to(device)
     with torch.no_grad():
-        recon_batch, _, _ = model(reco.view(-1, 784))
+        recon_batch, mu, logvar = model(reco.view(-1, 784))
 
     recon_batch = recon_batch.view(-1, 1, 28, 28).cpu()
 
     fig, axs = plt.subplots(2, 10, figsize=(10, 2))
     for i in range(10):
-        axs[0, i].imshow(recon_batch[i][0], cmap='gray')
+        axs[0, i].imshow(recon_batch[i][0].cpu().detach(), cmap='gray')
         axs[0, i].axis('off')
         axs[1, i].imshow(reco[i].view(28, 28).cpu().detach(), cmap='gray')
         axs[1, i].axis('off')
 
     plt.savefig(save_path)
 
-    
+mu = torch.randn(16, 20).to(device)
+logvar = torch.randn(16, 20).to(device)
+z = model.reparameterize(mu, logvar)
+img = model.decode(z).view(-1, 1, 28, 28)
+
+fig, axs = plt.subplots(1, 10, figsize=(10, 1))
+for i in range(10):
+    axs[i].imshow(img[i][0].cpu().detach(), cmap='gray')
+    axs[i].axis('off')
+
+plt.savefig('xx.png')
