@@ -205,3 +205,6 @@ def test():
     plt.savefig(save_path)
 
     
+
+
+# torchrun --nproc_per_node=2 vqvae.py --epochs 50

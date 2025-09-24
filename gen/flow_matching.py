@@ -199,24 +199,6 @@ class UNet(nn.Module):
         return self.output(x)
 
 
-# # Flow Matching时间调度策略
-# def get_time_schedule(batch_size, device):
-#     """生成随机时间步，范围[0,1]"""
-#     return torch.rand(batch_size, device=device)
-
-# def get_sigma_t(t):
-#     """计算时间t对应的噪声水平"""
-#     sigma_min = args['sigma_min']
-#     sigma_max = args['sigma_max']
-#     return sigma_min + t * (sigma_max - sigma_min)
-
-def get_index_from_list(values, t, x_shape):
-    """从列表中获取对应时间步t的值 - 保持接口兼容性"""
-    batch_size = t.shape[0]
-    out = values.gather(-1, t.cpu())
-    return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
-
-
 # Flow Matching前向过程：线性插值路径
 def flow_matching_sample(x1, t):
     noise = torch.randn_like(x1)

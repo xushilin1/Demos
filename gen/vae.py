@@ -130,9 +130,6 @@ if __name__ == '__main__':
     main()
 
 
-
-
-
 import torchvision
 import matplotlib.pyplot as plt
 
@@ -175,3 +172,7 @@ for i in range(10):
     axs[i].axis('off')
 
 plt.savefig('xx.png')
+
+
+
+# torchrun --nproc_per_node=2 vqvae.py --epochs 50
