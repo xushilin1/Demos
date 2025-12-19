@@ -8,33 +8,29 @@ from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy
 from torch.distributed.utils import _free_storage
 
-def create_process_groups():
+def create_process_groups(shard_group_size=8):
     world_size = dist.get_world_size()
     rank = dist.get_rank()
-    local_rank = rank % torch.cuda.device_count()
+    assert world_size % shard_group_size == 0, 'world_size shall be divided by shard_size'
 
-    num_gpus_per_node = torch.cuda.device_count()
-    node_id = rank // num_gpus_per_node
-    
-    # Create intra-node group (processes on the same node)
-    intra_node_group = None
-    inter_node_group = None
-    
-    for i in range(world_size // num_gpus_per_node):
-        ranks_in_node = list(range(i * num_gpus_per_node, (i + 1) * num_gpus_per_node))
-        group = dist.new_group(ranks_in_node)
-        if i == node_id:
-            intra_node_group = group
-    
-    # Create inter-node group (processes with same local rank across nodes)
-    for i in range(num_gpus_per_node):
-        ranks_across_nodes = list(range(i, world_size, num_gpus_per_node))
-        group = dist.new_group(ranks_across_nodes)
-        if i == local_rank:
-            inter_node_group = group
+    num_shards = world_size // shard_group_size
+    shard_group = None
+    replicate_group = None
+    for shard_group_id in range(num_shards):
+        shard_ranks = list(range(shard_group_id * shard_group_size, (shard_group_id + 1) * shard_group_size)) # 每个shard的rank列表, [0, 1, 2, 3, 4, 5, 6, 7]
 
-    return intra_node_group, inter_node_group
+        group = dist.new_group(ranks=shard_ranks)
+        if rank in shard_ranks:
+            shard_group = group
 
+    for replicate_group_id in range(shard_group_size):
+        replicate_ranks = [replicate_group_id + i * shard_group_size for i in range(num_shards)] # 每个replicate的rank列表, [0, 8, 16, 24]
+        group = dist.new_group(ranks=replicate_ranks)
+
+        if rank in replicate_ranks:
+            replicate_group = group
+
+    return shard_group, replicate_group
 
 def shard_model(
     model,
