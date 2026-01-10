@@ -36,6 +36,18 @@ def mp4_to_gif_simple(input_path: str, fps: int = 10, loop: int = 0):
     reader.close()
     
     print(f"✅ GIF生成完成：{output_path}")
+
+
+import imageio
+def gif_to_mp4_imageio(input_path, fps=10):
+    output_path = input_path.replace('.gif', '.mp4')
+    reader = imageio.get_reader(input_path)
+    writer = imageio.get_writer(output_path, fps=fps, codec='libx264',  pixelformat='yuv420p', quality=8)
+    for frame in reader:
+        writer.append_data(frame)
+    writer.close()
+    reader.close()
+    print(f"转换成功: {output_path}")
         
 
 if __name__ == '__main__':
