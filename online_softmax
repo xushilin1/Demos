@@ -1,0 +1,36 @@
+def online_softmax_forward(x, block_size=2):
+    """
+    模拟 Flash Attention 的分块前向传播
+    x: 输入的原始注意力得分 (1D Array)
+    block_size: 模拟 SRAM 的容量限制，每次只处理几个元素
+    """
+    N = len(x)
+    # 初始化统计量 (存储在 HBM 中)
+    m = -np.inf  # 行最大值
+    l = 0        # 归一化累加和 (row sum)
+    o = np.zeros_like(x) # 局部计算结果
+
+    # --- Tiling: 分块处理 ---
+    for i in range(0, N, block_size):
+        block = x[i : i + block_size]
+        
+        # 1. 计算当前块的统计量
+        m_block = np.max(block)
+        l_block = np.sum(np.exp(block - m_block))
+        
+        # 2. 更新全局统计量 (Online Update)
+        m_new = max(m, m_block)
+        # 对旧的累加和进行缩放，确保指数对齐
+        l = l * np.exp(m - m_new) + l_block * np.exp(m_block - m_new)
+        m = m_new
+        
+    # 最终的归一化因子 L 和最大值 m 已经得到
+    # 标准的 Softmax 结果应该是 np.exp(x - m) / l
+    probs = np.exp(x - m) / l
+    return probs, m, l
+
+x_input = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+p_online, m_final, l_final = online_softmax_forward(x_input, block_size=2)
+p_standard = np.exp(x_input - np.max(x_input)) / np.sum(np.exp(x_input - np.max(x_input)))
+print(f"数值误差: {np.linalg.norm(p_online - p_standard)}")
