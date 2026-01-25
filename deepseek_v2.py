@@ -1944,7 +1944,7 @@ class DeepseekV2ForCausalLM(DeepseekV2PreTrainedModel):
 
 # pip install transformers==4.39.3
 config = DeepseekV2Config()
-config.num_hidden_layers = 10
+config.num_hidden_layers = 3
 model = DeepseekV2ForCausalLM(config)
 
 
@@ -1955,4 +1955,15 @@ model_name = "deepseek-ai/DeepSeek-V2"
 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 text = "An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values, and output are all vectors. The output is"
 inputs = tokenizer(text, return_tensors="pt")
-outputs = model.generate(**inputs.to(model.device), max_new_tokens=100)
+
+
+position_ids = torch.arange(inputs['input_ids'].shape[1]).unsqueeze(0)
+model_inputs = {
+    "position_ids": position_ids,
+    "past_key_values": None,
+    "use_cache": True,
+    "attention_mask": inputs['attention_mask'],
+    "input_ids": inputs['input_ids'],
+}
+# model.training = False
+model.forward(**model_inputs)
